@@ -1,0 +1,15 @@
+# Copiez ce fichier en terraform.tfvars et renseignez vos valeurs.
+# terraform.tfvars est ignoré par git (peut contenir des secrets).
+
+render_api_key  = "rnd_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+render_owner_id = "tea-xxxxxxxxxxxxxxxxxxxx"
+
+image_url = "ghcr.io/<owner>/<repo>"
+image_tag = "latest"
+
+ghcr_username = "<github-username>"
+ghcr_token    = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+service_name = "flask-api-demo"
+region       = "frankfurt"
+plan         = "starter"
