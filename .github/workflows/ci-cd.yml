@@ -90,10 +90,30 @@ jobs:
           echo "TF_VAR_image_url=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           echo "TF_VAR_image_tag=${GITHUB_SHA}" >> "$GITHUB_ENV"
 
+      # Persiste le tfstate entre les runs (le runner éphémère le perd sinon).
+      # Sans état, Terraform retenterait de CRÉER des ressources déjà existantes (erreur 400).
+      - name: Restaurer / sauvegarder l'état Terraform
+        uses: actions/cache@v4
+        with:
+          path: terraform/terraform.tfstate
+          key: tfstate-${{ github.run_id }}
+          restore-keys: |
+            tfstate-
+
       - uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
         run: terraform init -input=false
+
+      # Amorçage one-shot : rattache au state les ressources déjà créées sur Render
+      # si elles n'y figurent pas (premier run, ou cache évincé). Auto-réparant.
+      # Supprimable une fois le state stabilisé dans le cache.
+      - name: Importer l'existant si absent du state
+        run: |
+          terraform state show render_registry_credential.ghcr >/dev/null 2>&1 \
+            || terraform import -input=false render_registry_credential.ghcr rgc-d8tq8vernols73bclg10
+          terraform state show render_web_service.api >/dev/null 2>&1 \
+            || terraform import -input=false render_web_service.api srv-d8tq8vrtqb8s73elh4bg
 
       - name: Terraform Plan
         run: terraform plan -input=false -no-color

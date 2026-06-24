@@ -129,10 +129,16 @@ terraform output service_url
 | `region`          | Région Render                              | `frankfurt`     |
 | `plan`            | Plan Render (`free` = sans carte bancaire) | `free`          |
 
-> **État Terraform en CI/CD.** Par défaut l'état est local. En CI, le runner étant
-> éphémère, configurez un **backend distant** (bloc commenté dans `versions.tf`, ex. S3
-> ou Terraform Cloud) pour que `terraform apply` soit idempotent d'un run à l'autre —
-> sinon Terraform tentera de recréer le service à chaque exécution.
+> **État Terraform en CI/CD.** Le runner GitHub est éphémère et perdrait le
+> `terraform.tfstate` entre deux runs (Terraform retenterait alors de *créer* des
+> ressources déjà existantes → erreur 400). Le workflow **persiste donc le state via le
+> cache GitHub Actions** (`actions/cache`), et un step d'amorçage one-shot **importe** les
+> ressources déjà créées sur Render si le state est vide. Résultat : chaque push fait un
+> *update* (redeploy de la nouvelle image) au lieu d'un *create*.
+>
+> Le `tfstate` contient des valeurs sensibles (token GHCR) **en clair** : acceptable ici
+> car le dépôt et son cache sont **privés**. Pour un usage pro, préférez un **backend
+> distant** chiffré (bloc commenté dans `versions.tf`, ex. S3 ou Terraform Cloud).
 
 ## Pipeline CI/CD
 
