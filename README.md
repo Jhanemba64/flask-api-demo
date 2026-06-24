@@ -127,7 +127,7 @@ terraform output service_url
 | `ghcr_token`      | Token `read:packages` (sensible)           | —               |
 | `service_name`    | Nom du service Render                      | `flask-api-demo`|
 | `region`          | Région Render                              | `frankfurt`     |
-| `plan`            | Plan Render                                | `starter`       |
+| `plan`            | Plan Render (`free` = sans carte bancaire) | `free`          |
 
 > **État Terraform en CI/CD.** Par défaut l'état est local. En CI, le runner étant
 > éphémère, configurez un **backend distant** (bloc commenté dans `versions.tf`, ex. S3

@@ -44,9 +44,9 @@ variable "region" {
 }
 
 variable "plan" {
-  description = "Plan Render : starter, standard, pro, ..."
+  description = "Plan Render : free, starter, standard, pro, ... (free = sans carte bancaire)."
   type        = string
-  default     = "starter"
+  default     = "free"
 }
 
 variable "app_port" {
