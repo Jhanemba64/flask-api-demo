@@ -120,3 +120,20 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve -input=false -no-color
+
+      # Déploie l'image de ce commit via l'API Render (le service est déjà
+      # provisionné par Terraform ; on évite ainsi l'update Terraform interdit en free).
+      - name: Déclencher le deploy de la nouvelle image sur Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          SID=$(terraform output -raw service_id)
+          IMG="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          echo "Deploy de $IMG sur le service $SID"
+          code=$(curl -sS -o /tmp/deploy.json -w "%{http_code}" -X POST \
+            "https://api.render.com/v1/services/${SID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"imageUrl\":\"${IMG}\"}")
+          echo "HTTP ${code}"; cat /tmp/deploy.json; echo
+          case "$code" in 200|201|202) echo "Deploy déclenché.";; *) echo "Échec du déclenchement"; exit 1;; esac
