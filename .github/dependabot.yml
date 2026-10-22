@@ -15,6 +15,10 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Montées de version majeures : décision manuelle (changements cassants)
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python:
         patterns: ["*"]
@@ -23,8 +27,16 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Montées de version majeures : décision manuelle (changements cassants)
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: terraform
     directory: /terraform
     schedule:
       interval: monthly
+    ignore:
+      # Montées de version majeures : décision manuelle (changements cassants)
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
