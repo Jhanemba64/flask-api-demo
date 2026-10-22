@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Droits minimaux par défaut ; chaque job élargit seulement ce dont il a besoin.
+# Les actions sont épinglées par SHA de commit (Dependabot les met à jour).
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -17,9 +22,11 @@ jobs:
     name: Tests d'intégration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
           cache: pip
@@ -32,48 +39,109 @@ jobs:
       - name: Lancer pytest
         run: pytest -v
 
-  # 2) Build de l'image Docker + publication sur GHCR -------------------------
-  build-and-push:
-    name: Build & push GHCR
-    needs: test
+  # 2) Sécurité du dépôt : secrets dans l'historique, bonnes pratiques du Dockerfile
+  securite:
+    name: Secrets (gitleaks) et Dockerfile (Hadolint)
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tout l'historique, pour y chercher des secrets
+          persist-credentials: false
+
+      - name: Recherche de secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Hadolint
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+
+  # 3) Image : scan Trivy, publication GHCR, SBOM et attestation de provenance --
+  image:
+    name: Image (Trivy, GHCR, SBOM, provenance)
+    needs: [test, securite]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write      # publication sur GHCR
+      id-token: write      # signature Sigstore de l'attestation
+      attestations: write  # enregistrement de l'attestation
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Construction de l'image pour l'analyse
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: flask-api-demo:scan
+
+      # Bloquant sur les vulnérabilités critiques et élevées pour lesquelles un correctif existe
+      - name: Scan Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: flask-api-demo:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: SBOM de l'image (SPDX, en artefact du run)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: flask-api-demo:scan
+          format: spdx-json
+          artifact-name: sbom-flask-api-demo.spdx.json
 
       - name: Connexion à GHCR
-        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Métadonnées de l'image (tags + labels)
+        if: github.event_name != 'pull_request'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=sha,prefix=,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build & push
-        uses: docker/build-push-action@v6
+      - name: Publication sur GHCR
+        if: github.event_name != 'pull_request'
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # 3) Provisioning / déploiement sur Render via Terraform --------------------
+      # Provenance signée (Sigstore) : vérifiable avec
+      #   gh attestation verify oci://ghcr.io/jhanemba64/flask-api-demo:latest --owner Jhanemba64
+      - name: Attestation de provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/jhanemba64/flask-api-demo
+          subject-digest: ${{ steps.push.outputs.digest }}
+
+  # 4) Provisioning / déploiement sur Render via Terraform --------------------
+  # Désactivé par défaut : il ne tourne que si la variable de dépôt RENDER_DEPLOY vaut "true"
+  # (Settings → Secrets and variables → Actions → Variables). Voir le README.
   deploy:
     name: Provisioning Render (Terraform)
-    needs: build-and-push
+    needs: image
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.RENDER_DEPLOY == 'true'
     defaults:
       run:
         working-directory: terraform
@@ -83,7 +151,9 @@ jobs:
       TF_VAR_ghcr_username: ${{ github.repository_owner }}
       TF_VAR_ghcr_token: ${{ secrets.GHCR_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Préparer les variables Terraform (image GHCR de ce commit)
         run: |
@@ -93,14 +163,14 @@ jobs:
       # Persiste le tfstate entre les runs (le runner éphémère le perd sinon).
       # Sans état, Terraform retenterait de CRÉER des ressources déjà existantes (erreur 400).
       - name: Restaurer / sauvegarder l'état Terraform
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: terraform/terraform.tfstate
           key: tfstate-${{ github.run_id }}
           restore-keys: |
             tfstate-
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
 
       - name: Terraform Init
         run: terraform init -input=false

@@ -1,0 +1,30 @@
+# Mises à jour proposées chaque mois, regroupées par écosystème.
+# Les correctifs de sécurité sont proposés dès leur publication (alertes Dependabot).
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: monthly

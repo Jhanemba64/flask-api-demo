@@ -1,11 +1,14 @@
 # Automatisation du déploiement de conteneurs
 
-API Flask minimale, testée, dockerisée, publiée sur **GitHub Container Registry (GHCR)**
-et déployée automatiquement sur **Render** via **Terraform**, le tout orchestré par un
-pipeline **GitHub Actions**.
+[![CI/CD](https://github.com/Jhanemba64/flask-api-demo/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Jhanemba64/flask-api-demo/actions/workflows/ci-cd.yml)
+
+API Flask minimale, testée, dockerisée, analysée, publiée sur **GitHub Container Registry (GHCR)**
+avec son SBOM et une attestation de provenance signée, puis déployée sur **Render** via **Terraform**,
+le tout orchestré par un pipeline **GitHub Actions**.
 
 ```
-Code  ──▶  Tests (pytest)  ──▶  Build Docker  ──▶  Push GHCR  ──▶  Terraform  ──▶  Render
+Code ─▶ Tests (pytest) ─▶ Secrets (gitleaks) + Dockerfile (Hadolint) ─▶ Build ─▶ Scan (Trivy)
+     ─▶ SBOM + Push GHCR + provenance signée ─▶ Terraform ─▶ Render
                                           GitHub Actions (CI/CD)
 ```
 
@@ -19,6 +22,7 @@ Code  ──▶  Tests (pytest)  ──▶  Build Docker  ──▶  Push GHCR  
 - [Terraform / Render](#terraform--render)
 - [Pipeline CI/CD](#pipeline-cicd)
 - [Secrets GitHub à configurer](#secrets-github-à-configurer)
+- [Licence](#licence)
 
 ## Architecture
 
@@ -136,19 +140,32 @@ terraform output service_url
 > ressources déjà créées sur Render si le state est vide. Résultat : chaque push fait un
 > *update* (redeploy de la nouvelle image) au lieu d'un *create*.
 >
-> Le `tfstate` contient des valeurs sensibles (token GHCR) **en clair** : acceptable ici
-> car le dépôt et son cache sont **privés**. Pour un usage pro, préférez un **backend
-> distant** chiffré (bloc commenté dans `versions.tf`, ex. S3 ou Terraform Cloud).
+> Le `tfstate` contient des valeurs sensibles (token GHCR) **en clair**. Le dépôt étant
+> public, les workflows de pull requests venues de forks peuvent lire le cache de la branche
+> principale : le déploiement est donc **désactivé par défaut** (voir [Pipeline CI/CD](#pipeline-cicd)).
+> Pour l'activer durablement, passer d'abord à un **backend distant** chiffré (bloc commenté
+> dans `versions.tf`, ex. S3 ou Terraform Cloud).
 
 ## Pipeline CI/CD
 
 `.github/workflows/ci-cd.yml`, déclenché sur push/PR vers `main` et `workflow_dispatch` :
 
 1. **test** — installe les deps et lance `pytest` (sur push et PR).
-2. **build-and-push** — login GHCR (`GITHUB_TOKEN`), build de l'image et push avec deux
-   tags : le SHA complet du commit et `latest` (uniquement hors PR).
-3. **deploy** — `terraform init/plan/apply` pour provisionner/déployer sur Render,
-   en passant l'image taguée au SHA du commit (uniquement sur `main`).
+2. **securite** — recherche de secrets dans tout l'historique git (**gitleaks**) et
+   contrôle des bonnes pratiques du `Dockerfile` (**Hadolint**).
+3. **image** — build de l'image, scan **Trivy** bloquant sur les failles critiques et
+   élevées corrigeables, **SBOM** SPDX en artefact du run ; hors PR : push sur GHCR (tags
+   SHA du commit et `latest`) et **attestation de provenance** signée par Sigstore,
+   vérifiable avec `gh attestation verify oci://ghcr.io/jhanemba64/flask-api-demo:latest --owner Jhanemba64`.
+4. **deploy** — `terraform init/plan/apply` pour provisionner/déployer sur Render, en
+   passant l'image taguée au SHA du commit. **Désactivé par défaut** : il ne tourne sur
+   `main` que si la variable de dépôt `RENDER_DEPLOY` vaut `true`
+   (`gh variable set RENDER_DEPLOY --body true`).
+
+Sécurité de la chaîne elle-même : droits du `GITHUB_TOKEN` en lecture seule par défaut,
+actions épinglées par SHA de commit, mises à jour proposées chaque mois par **Dependabot**
+(actions, dépendances Python, image de base, provider Terraform). L'image s'exécute sans
+les droits root et pip en est retiré après l'installation des dépendances.
 
 ## Secrets GitHub à configurer
 
@@ -173,3 +190,7 @@ gh secret set RENDER_API_KEY  --body "rnd_xxx"
 gh secret set RENDER_OWNER_ID --body "tea-xxx"
 gh secret set GHCR_TOKEN      --body "ghp_xxx"
 ```
+
+## Licence
+
+[MIT](LICENSE)

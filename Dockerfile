@@ -8,9 +8,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Installer les dépendances d'abord (optimise le cache de couches Docker)
+# Installer les dépendances d'abord (optimise le cache de couches Docker),
+# puis retirer pip, inutile à l'exécution et source de vulnérabilités
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && pip uninstall -y pip
 
 # Copier le code de l'API
 COPY app/ ./app/
@@ -19,8 +20,8 @@ COPY app/ ./app/
 EXPOSE 5000
 
 # Exécuter en utilisateur non-root
-RUN useradd --create-home appuser
-USER appuser
+RUN useradd --create-home --uid 1000 appuser
+USER 1000
 
 # Démarrer l'application Flask via gunicorn.
 # Bind sur $PORT (injecté par Render) avec repli sur 5000.
